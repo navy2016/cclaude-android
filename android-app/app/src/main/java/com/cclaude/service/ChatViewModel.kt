@@ -10,7 +10,10 @@ import com.cclaude.zig.ApprovalCallback
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.SharingStarted
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val agent = CClaudeAgent(application)
@@ -24,15 +27,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
 
-    val canUndo: StateFlow<Boolean> = agent.canUndo
-    val canRedo: StateFlow<Boolean> = agent.canRedo
+    private val _localCanUndo = MutableStateFlow(false)
+    private val _localCanRedo = MutableStateFlow(false)
+
+    val canUndo: StateFlow<Boolean> = combine(agent.canUndo, _localCanUndo) { a, b -> a || b }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val canRedo: StateFlow<Boolean> = combine(agent.canRedo, _localCanRedo) { a, b -> a || b }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val undoDescription: StateFlow<String?> = agent.undoDescription
     val redoDescription: StateFlow<String?> = agent.redoDescription
 
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
 
-    // UI-side history for visible rollback
     private val undoSnapshots = ArrayDeque<List<Message>>()
     private val redoSnapshots = ArrayDeque<List<Message>>()
 
@@ -50,6 +58,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun syncLocalUndoState() {
+        _localCanUndo.value = undoSnapshots.isNotEmpty()
+        _localCanRedo.value = redoSnapshots.isNotEmpty()
+    }
+
     suspend fun initialize(apiKey: String): Boolean {
         val success = agent.initialize(apiKey)
         _isInitialized.value = success
@@ -60,6 +73,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 .apply()
             _showSettings.value = false
         }
+        syncLocalUndoState()
         return success
     }
 
@@ -67,6 +81,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         undoSnapshots.addLast(_messages.value.map { it.copy() })
         if (undoSnapshots.size > 100) undoSnapshots.removeFirst()
         redoSnapshots.clear()
+        syncLocalUndoState()
     }
 
     suspend fun sendMessage(content: String) {
@@ -120,6 +135,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
         } finally {
             _isLoading.value = false
+            syncLocalUndoState()
         }
     }
 
@@ -128,8 +144,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (undoSnapshots.isNotEmpty()) {
             redoSnapshots.addLast(_messages.value.map { it.copy() })
             _messages.value = undoSnapshots.removeLast()
+            syncLocalUndoState()
             return true
         }
+        syncLocalUndoState()
         return nativeOk
     }
 
@@ -138,14 +156,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (redoSnapshots.isNotEmpty()) {
             undoSnapshots.addLast(_messages.value.map { it.copy() })
             _messages.value = redoSnapshots.removeLast()
+            syncLocalUndoState()
             return true
         }
+        syncLocalUndoState()
         return nativeOk
     }
 
     fun clearChat() {
         pushUndoSnapshot()
         _messages.value = emptyList()
+        syncLocalUndoState()
     }
 
     fun showSettings() {
