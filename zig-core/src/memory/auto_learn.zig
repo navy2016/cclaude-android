@@ -15,10 +15,7 @@ pub const AutoLearn = struct {
         };
     }
     
-    /// Build extraction prompt for auto-learning
     pub fn buildExtractionPrompt(self: *const AutoLearn, user_input: []const u8, tool_summary: []const u8) ![]const u8 {
-        _ = self;
-        
         return try std.fmt.allocPrint(self.allocator,
             \\Analyze this agent interaction and extract ONLY genuinely useful long-term facts.
             \\Focus on:
@@ -39,7 +36,6 @@ pub const AutoLearn = struct {
         , .{user_input, tool_summary});
     }
     
-    /// Parse LLM response and extract facts
     pub fn parseFacts(self: *const AutoLearn, response: []const u8, allocator: std.mem.Allocator) !std.ArrayList(struct { target: []const u8, fact: []const u8 }) {
         var facts = std.ArrayList(struct { target: []const u8, fact: []const u8 }).init(allocator);
         errdefer {
@@ -76,7 +72,6 @@ pub const AutoLearn = struct {
         return facts;
     }
     
-    /// Format fact for storage
     pub fn formatFact(self: *const AutoLearn, allocator: std.mem.Allocator, fact: []const u8) ![]const u8 {
         _ = self;
         return try std.fmt.allocPrint(allocator, "- {s}", .{fact});
