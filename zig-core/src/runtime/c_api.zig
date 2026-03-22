@@ -13,7 +13,7 @@ const RuntimeState = struct {
     can_undo: bool = false,
     can_redo: bool = false,
     last_user_message: ?[]u8 = null,
-    last_response: ?[]u8 = null,
+    last_response: ?[]const u8 = null,
     undo_desc: ?[]u8 = null,
     redo_desc: ?[]u8 = null,
 
