@@ -60,6 +60,43 @@ class CClaudeAgent(private val context: Context) {
         result == 0
     }
 
+
+    suspend fun testProviderConnection(): ProviderTestResult = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
+        return@withContext try {
+            when (providerConfig.providerType) {
+                ProviderType.CLAUDE, ProviderType.CLAUDE_COMPAT -> {
+                    val body = "{\"model\":\"${providerConfig.model}\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
+                    val req = Request.Builder()
+                        .url(providerConfig.baseUrl.trimEnd('/') + "/messages")
+                        .post(body.toRequestBody("application/json".toMediaType()))
+                        .header("Content-Type", "application/json")
+                        .header("x-api-key", providerConfig.apiKey)
+                        .header("anthropic-version", "2023-06-01")
+                        .build()
+                    client.newCall(req).execute().use { r ->
+                        ProviderTestResult(r.isSuccessful, r.code, r.body?.string() ?: "", System.currentTimeMillis() - start)
+                    }
+                }
+                ProviderType.OPENAI_COMPAT -> {
+                    val temperature = if (providerConfig.model.contains("kimi-k2.5", ignoreCase = true)) "1" else "0.2"
+                    val body = "{\"model\":\"${providerConfig.model}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"temperature\":$temperature,\"stream\":false}"
+                    val req = Request.Builder()
+                        .url(providerConfig.baseUrl.trimEnd('/') + providerConfig.chatPath)
+                        .post(body.toRequestBody("application/json".toMediaType()))
+                        .header("Content-Type", "application/json")
+                        .header("Authorization", "Bearer ${providerConfig.apiKey}")
+                        .build()
+                    client.newCall(req).execute().use { r ->
+                        ProviderTestResult(r.isSuccessful, r.code, r.body?.string() ?: "", System.currentTimeMillis() - start)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            ProviderTestResult(false, 500, e.message ?: "unknown", System.currentTimeMillis() - start)
+        }
+    }
+
     suspend fun sendMessage(message: String, onToken: (String) -> Unit): String = withContext(Dispatchers.IO) {
         val callback = object : TokenCallback {
             override fun onToken(token: String) {
