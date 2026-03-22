@@ -234,7 +234,7 @@ export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*
 
     setOwnedString(&state.last_user_message, msg, state.allocator) catch return @ptrCast("Error: OOM");
     const response = buildNativeReply(state, msg) catch |err| {
-        return @ptrCast(@errorName(err).ptr);
+        return @ptrCast("Error: native runtime failure");
     };
 
     if (state.last_response) |old| state.allocator.free(old);
