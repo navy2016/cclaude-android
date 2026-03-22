@@ -31,7 +31,7 @@ const RuntimeState = struct {
         self.allocator.free(self.data_dir);
         self.allocator.free(self.api_key);
         if (self.last_user_message) |msg| self.allocator.free(msg);
-        if (self.last_response) |msg| self.allocator.free(msg);
+        if (self.last_response) |msg| self.allocator.free(@constCast(msg));
         if (self.undo_desc) |msg| self.allocator.free(msg);
         if (self.redo_desc) |msg| self.allocator.free(msg);
         self.allocator.destroy(self);
@@ -58,52 +58,80 @@ fn setOwnedString(slot: *?[]u8, value: []const u8, a: std.mem.Allocator) !void {
     slot.* = try a.dupe(u8, value);
 }
 
+fn pathExists(path: []const u8) bool {
+    std.fs.cwd().access(path, .{}) catch return false;
+    return true;
+}
 
 fn nativeReadFile(state: *RuntimeState, path: []const u8) ![]const u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
+    const trimmed = std.mem.trim(u8, path, " \t\r\n");
+    const file = std.fs.cwd().openFile(trimmed, .{}) catch |err| {
+        return std.fmt.allocPrint(state.allocator, "Read failed: {s} -> {s}", .{ trimmed, @errorName(err) });
+    };
     defer file.close();
-    return try file.readToEndAlloc(state.allocator, 1024 * 1024);
+    return try file.readToEndAlloc(state.allocator, 2 * 1024 * 1024);
 }
 
 fn nativeWriteFile(state: *RuntimeState, path: []const u8, content: []const u8) ![]const u8 {
-    if (std.mem.lastIndexOf(u8, path, "/")) |last_slash| {
-        const dir_path = path[0..last_slash];
+    const trimmed = std.mem.trim(u8, path, " \t\r\n");
+    if (std.mem.lastIndexOf(u8, trimmed, "/")) |last_slash| {
+        const dir_path = trimmed[0..last_slash];
         std.fs.cwd().makePath(dir_path) catch {};
     }
-    const file = try std.fs.cwd().createFile(path, .{});
+    const file = std.fs.cwd().createFile(trimmed, .{}) catch |err| {
+        return std.fmt.allocPrint(state.allocator, "Write failed: {s} -> {s}", .{ trimmed, @errorName(err) });
+    };
     defer file.close();
     try file.writeAll(content);
-    return try std.fmt.allocPrint(state.allocator, "Wrote file: {s}", .{path});
+    return try std.fmt.allocPrint(state.allocator, "Wrote file: {s}", .{trimmed});
 }
 
-fn nativeSearch(state: *RuntimeState, needle: []const u8) ![]const u8 {
+fn searchDir(state: *RuntimeState, base_path: []const u8, needle: []const u8) ![]const u8 {
     var result = std.ArrayList(u8).init(state.allocator);
     defer result.deinit();
-    var dir = try std.fs.cwd().openDir(".", .{ .iterate = true });
+
+    var dir = std.fs.cwd().openDir(base_path, .{ .iterate = true }) catch |err| {
+        return std.fmt.allocPrint(state.allocator, "Search open dir failed: {s} -> {s}", .{ base_path, @errorName(err) });
+    };
     defer dir.close();
-    var walker = try dir.walk(state.allocator);
+
+    var walker = dir.walk(state.allocator) catch |err| {
+        return std.fmt.allocPrint(state.allocator, "Search walk failed: {s} -> {s}", .{ base_path, @errorName(err) });
+    };
     defer walker.deinit();
+
     while (try walker.next()) |entry| {
         if (entry.kind != .file) continue;
         const file = dir.openFile(entry.path, .{}) catch continue;
         defer file.close();
-        const content = file.readToEndAlloc(state.allocator, 1024 * 1024) catch continue;
+        const content = file.readToEndAlloc(state.allocator, 512 * 1024) catch continue;
         defer state.allocator.free(content);
         if (std.mem.indexOf(u8, content, needle) != null) {
-            try result.writer().print("{s}\n", .{entry.path});
+            try result.writer().print("{s}/{s}\n", .{ base_path, entry.path });
         }
     }
-    if (result.items.len == 0) return try state.allocator.dupe(u8, "No matches found");
+
+    if (result.items.len == 0) {
+        return try state.allocator.dupe(u8, "No matches found");
+    }
     return try state.allocator.dupe(u8, result.items);
 }
 
 fn memoryShow(state: *RuntimeState) ![]const u8 {
-    const soul = std.fs.cwd().readFileAlloc(state.allocator, try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "SOUL.md" }), 1024 * 1024) catch try state.allocator.dupe(u8, "");
+    const soul_path = try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "SOUL.md" });
+    defer state.allocator.free(soul_path);
+    const user_path = try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "USER.md" });
+    defer state.allocator.free(user_path);
+    const mem_path = try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "MEMORY.md" });
+    defer state.allocator.free(mem_path);
+
+    const soul = std.fs.cwd().readFileAlloc(state.allocator, soul_path, 1024 * 1024) catch try state.allocator.dupe(u8, "# Soul\n");
     defer state.allocator.free(soul);
-    const user = std.fs.cwd().readFileAlloc(state.allocator, try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "USER.md" }), 1024 * 1024) catch try state.allocator.dupe(u8, "");
+    const user = std.fs.cwd().readFileAlloc(state.allocator, user_path, 1024 * 1024) catch try state.allocator.dupe(u8, "# User Profile\n");
     defer state.allocator.free(user);
-    const mem = std.fs.cwd().readFileAlloc(state.allocator, try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "MEMORY.md" }), 1024 * 1024) catch try state.allocator.dupe(u8, "");
+    const mem = std.fs.cwd().readFileAlloc(state.allocator, mem_path, 1024 * 1024) catch try state.allocator.dupe(u8, "# Long-term Memory\n");
     defer state.allocator.free(mem);
+
     return try std.fmt.allocPrint(state.allocator, "## Soul\n{s}\n\n## User\n{s}\n\n## Memory\n{s}", .{ soul, user, mem });
 }
 
@@ -117,14 +145,15 @@ fn ensureContextFiles(state: *RuntimeState) !void {
         .{ "USER.md", "# User Profile\n\n- Prefers Android-native local agent workflows\n" },
         .{ "MEMORY.md", "# Long-term Memory\n\n- Native Zig runtime initialized\n" },
     };
+
     for (defaults) |entry| {
         const fp = try std.fs.path.join(state.allocator, &.{ base, entry[0] });
         defer state.allocator.free(fp);
-        std.fs.cwd().access(fp, .{}) catch {
+        if (!pathExists(fp)) {
             const f = try std.fs.cwd().createFile(fp, .{});
             defer f.close();
             try f.writeAll(entry[1]);
-        };
+        }
     }
 }
 
@@ -134,14 +163,15 @@ fn appendMemory(state: *RuntimeState, file_name: []const u8, line: []const u8) !
     const current = std.fs.cwd().readFileAlloc(state.allocator, fp, 1024 * 1024) catch try state.allocator.dupe(u8, "");
     defer state.allocator.free(current);
     const merged = try std.fmt.allocPrint(state.allocator, "{s}\n- {s}\n", .{ current, line });
-    defer state.allocator.free(merged);
     const f = try std.fs.cwd().createFile(fp, .{});
     defer f.close();
     try f.writeAll(merged);
+    state.allocator.free(merged);
 }
 
 fn runResearch(state: *RuntimeState, idea: []const u8) ![]const u8 {
-    return try std.fmt.allocPrint(state.allocator,
+    return try std.fmt.allocPrint(
+        state.allocator,
         "[Native Zig Research]\nIdea: {s}\nStages: literature -> hypothesis -> experiment -> paper\nStatus: rollback-first orchestrator active",
         .{ idea },
     );
@@ -150,23 +180,17 @@ fn runResearch(state: *RuntimeState, idea: []const u8) ![]const u8 {
 fn handleToolCommand(state: *RuntimeState, message: []const u8) ![]const u8 {
     if (std.mem.startsWith(u8, message, "/tool readfile ")) {
         const path = message[15..];
-        const args = try std.fmt.allocPrint(state.allocator, "{{\"path\":\"{s}\"}}", .{path});
-        defer state.allocator.free(args);
         return try nativeReadFile(state, path);
     }
     if (std.mem.startsWith(u8, message, "/tool search ")) {
-        const rest = message[13..];
-        const args = try std.fmt.allocPrint(state.allocator, "{{\"path\":\".\",\"regex\":\"{s}\"}}", .{rest});
-        defer state.allocator.free(args);
-        return try nativeSearch(state, rest);
+        const rest = std.mem.trim(u8, message[13..], " \t\r\n");
+        return try searchDir(state, ".", rest);
     }
     if (std.mem.startsWith(u8, message, "/tool writefile ")) {
         const rest = message[16..];
         if (std.mem.indexOf(u8, rest, " :: ")) |sep| {
             const path = rest[0..sep];
             const content = rest[sep + 4 ..];
-            const args = try std.fmt.allocPrint(state.allocator, "{{\"path\":\"{s}\",\"content\":\"{s}\"}}", .{path, content});
-            defer state.allocator.free(args);
             return try nativeWriteFile(state, path, content);
         }
         return try state.allocator.dupe(u8, "Usage: /tool writefile <path> :: <content>");
@@ -188,7 +212,7 @@ fn buildNativeReply(state: *RuntimeState, msg: []const u8) ![]const u8 {
     }
 
     if (std.mem.startsWith(u8, msg, "/research ")) {
-        const idea = msg[10..];
+        const idea = std.mem.trim(u8, msg[10..], " \t\r\n");
         try appendMemory(state, "MEMORY.md", "Triggered native research pipeline");
         return try runResearch(state, idea);
     }
@@ -237,7 +261,7 @@ export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*
         return @ptrCast("Error: native runtime failure");
     };
 
-    if (state.last_response) |old| state.allocator.free(old);
+    if (state.last_response) |old| state.allocator.free(@constCast(old));
     state.last_response = response;
     setOwnedString(&state.undo_desc, "Undo last native operation", state.allocator) catch {};
     setOwnedString(&state.redo_desc, "Redo last native operation", state.allocator) catch {};
@@ -251,7 +275,6 @@ export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*
             defer state.allocator.free(token);
             if (allocNullTerminated(token)) |cstr| {
                 cb(cstr);
-                cclaude_free_string(cstr);
             }
         }
     }
