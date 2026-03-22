@@ -113,7 +113,7 @@ export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*
         }
     }
 
-    return allocNullTerminated(response);
+    return allocNullTerminated(response) orelse @ptrCast("Error: response alloc failed");
 }
 
 export fn cclaude_undo() i32 {
