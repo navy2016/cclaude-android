@@ -370,7 +370,9 @@ fn reactLoop(state: *RuntimeState, msg: []const u8) ![]u8 {
     if (std.mem.eql(u8, msg, "/memory show")) return try memoryShow(state);
     if (std.mem.startsWith(u8, msg, "/research ")) return try runResearch(state, std.mem.trim(u8, msg[10..], " \t\r\n"));
     try classifyAndRemember(state, msg);
-    if (state.http_callback != null and state.api_key.len > 0) return llmDrivenReAct(state, msg) catch {};
+    if (state.http_callback != null and state.api_key.len > 0) {
+        if (llmDrivenReAct(state, msg)) |v| return v else |_| {}
+    }
     return try std.fmt.allocPrint(state.allocator, "[Deterministic Fallback]\nReceived: {s}\nSet API key to unlock LLM-driven ReAct.", .{msg});
 }
 
@@ -431,7 +433,7 @@ export fn cclaude_redo() i32 {
     if (state.redo_stack.items.len == 0) return 0;
     const op = state.redo_stack.pop();
     const f = std.fs.cwd().createFile(op.target, .{}) catch return -1; defer f.close();
-    try f.writeAll(op.previous) catch return -1;
+    f.writeAll(op.previous) catch return -1;
     state.undo_stack.append(op) catch return -1;
     state.can_undo = state.undo_stack.items.len > 0;
     state.can_redo = state.redo_stack.items.len > 0;
