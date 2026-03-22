@@ -45,13 +45,14 @@ class CClaudeAgent(private val context: Context) {
         providerConfig = providerConfig.copy(apiKey = apiKey)
         providerManager.save(providerConfig)
 
-        CClaudeNative.setHttpCallback(object : HttpCallback {
-            override fun execute(url: String, headers: String, body: ByteArray): String {
-                return executeHttpRequest(url, headers, body)
-            }
-        })
-
         val result = CClaudeNative.init(dataDir, apiKey)
+        if (result == 0) {
+            CClaudeNative.setHttpCallback(object : HttpCallback {
+                override fun execute(url: String, headers: String, body: ByteArray): String {
+                    return executeHttpRequest(url, headers, body)
+                }
+            })
+        }
         _isInitialized.value = result == 0
         updateUndoRedoState()
         result == 0
@@ -109,7 +110,8 @@ class CClaudeAgent(private val context: Context) {
                 ProviderType.OPENAI_COMPAT -> executeOpenAICompatible(body)
             }
         } catch (e: Exception) {
-            "500:${e.message}"
+            val msg = escapeJson(e.message ?: "unknown")
+            return "500:{\"content\":[{\"type\":\"text\",\"text\":\"Provider HTTP error: $msg\"}]}"
         }
     }
 
