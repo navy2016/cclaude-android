@@ -7,10 +7,10 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.cclaude.data.Message
+import com.cclaude.data.MessageRole
 
 @Composable
 fun ChatMessageItem(message: Message) {
@@ -24,9 +24,7 @@ fun ChatMessageItem(message: Message) {
             Icon(
                 imageVector = Icons.Default.Computer,
                 contentDescription = "AI",
-                modifier = Modifier
-                    .size(32.dp)
-                    .padding(end = 8.dp)
+                modifier = Modifier.size(32.dp).padding(end = 8.dp)
             )
         }
         
@@ -55,9 +53,7 @@ fun ChatMessageItem(message: Message) {
             Icon(
                 imageVector = Icons.Default.Person,
                 contentDescription = "User",
-                modifier = Modifier
-                    .size(32.dp)
-                    .padding(start = 8.dp)
+                modifier = Modifier.size(32.dp).padding(start = 8.dp)
             )
         }
     }
