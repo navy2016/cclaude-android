@@ -1,7 +1,4 @@
 //! Auto-Learn - LLM-driven automatic memory extraction
-//!
-//! After each tool execution, analyze the interaction and extract
-//! useful facts to store in USER.md or MEMORY.md
 
 const std = @import("std");
 
@@ -19,7 +16,7 @@ pub const AutoLearn = struct {
     }
     
     /// Build extraction prompt for auto-learning
-    pub fn buildExtractionPrompt(self: AutoLearn, user_input: []const u8, tool_summary: []const u8) ![]const u8 {
+    pub fn buildExtractionPrompt(self: *const AutoLearn, user_input: []const u8, tool_summary: []const u8) ![]const u8 {
         _ = self;
         
         return try std.fmt.allocPrint(self.allocator,
@@ -43,7 +40,7 @@ pub const AutoLearn = struct {
     }
     
     /// Parse LLM response and extract facts
-    pub fn parseFacts(self: AutoLearn, response: []const u8, allocator: std.mem.Allocator) !std.ArrayList(struct { target: []const u8, fact: []const u8 }) {
+    pub fn parseFacts(self: *const AutoLearn, response: []const u8, allocator: std.mem.Allocator) !std.ArrayList(struct { target: []const u8, fact: []const u8 }) {
         var facts = std.ArrayList(struct { target: []const u8, fact: []const u8 }).init(allocator);
         errdefer {
             for (facts.items) |f| {
@@ -57,19 +54,15 @@ pub const AutoLearn = struct {
         while (lines.next()) |line| {
             const trimmed = std.mem.trim(u8, line, " \t\r");
             
-            // Skip empty lines and NONE
             if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "NONE")) continue;
             
-            // Parse [TARGET] fact format
             if (std.mem.startsWith(u8, trimmed, "[")) {
                 if (std.mem.indexOf(u8, trimmed, "]")) |close_bracket| {
                     const target = trimmed[1..close_bracket];
                     const fact = std.mem.trim(u8, trimmed[close_bracket + 1..], " -");
                     
-                    // Validate length
                     if (fact.len < self.min_length or fact.len > self.max_length) continue;
                     
-                    // Validate target
                     if (!std.mem.eql(u8, target, "USER") and !std.mem.eql(u8, target, "MEMORY")) continue;
                     
                     try facts.append(.{
@@ -83,8 +76,8 @@ pub const AutoLearn = struct {
         return facts;
     }
     
-    /// Format fact for storage in Markdown
-    pub fn formatFact(self: AutoLearn, allocator: std.mem.Allocator, fact: []const u8) ![]const u8 {
+    /// Format fact for storage
+    pub fn formatFact(self: *const AutoLearn, allocator: std.mem.Allocator, fact: []const u8) ![]const u8 {
         _ = self;
         return try std.fmt.allocPrint(allocator, "- {s}", .{fact});
     }
