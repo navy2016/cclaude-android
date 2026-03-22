@@ -219,6 +219,40 @@ fn handleToolCommand(state: *RuntimeState, message: []const u8) ![]const u8 {
     return try state.allocator.dupe(u8, "Unknown /tool command");
 }
 
+
+fn containsAny(hay: []const u8, needles: []const []const u8) bool {
+    for (needles) |n| {
+        if (std.mem.indexOf(u8, hay, n) != null) return true;
+    }
+    return false;
+}
+
+fn importedDirPath(state: *RuntimeState) ![]u8 {
+    return try std.fs.path.join(state.allocator, &.{ state.data_dir, "..", "imports" });
+}
+
+fn latestImportedFile(state: *RuntimeState) !?[]u8 {
+    const dir_path = try importedDirPath(state);
+    defer state.allocator.free(dir_path);
+    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return null;
+    defer dir.close();
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (entry.kind == .file) {
+            return try std.fs.path.join(state.allocator, &.{ dir_path, entry.name });
+        }
+    }
+    return null;
+}
+
+fn classifyAndRemember(state: *RuntimeState, msg: []const u8) !void {
+    if (containsAny(msg, &.{ "喜欢", "prefer", "偏好", "习惯" })) {
+        try appendMemory(state, "USER.md", msg);
+    } else {
+        try appendMemory(state, "MEMORY.md", msg);
+    }
+}
+
 fn buildNativeReply(state: *RuntimeState, msg: []const u8) ![]const u8 {
     try ensureContextFiles(state);
 
@@ -238,7 +272,23 @@ fn buildNativeReply(state: *RuntimeState, msg: []const u8) ![]const u8 {
         return try runResearch(state, idea);
     }
 
-    try appendMemory(state, "USER.md", "User sent a native message");
+    try classifyAndRemember(state, msg);
+
+    if (containsAny(msg, &.{ "search", "find", "查找", "搜索" })) {
+        return try searchDir(state, try std.fs.path.join(state.allocator, &.{ state.data_dir, "context" }), "CClaude");
+    }
+
+    if (containsAny(msg, &.{ "research", "论文", "研究", "paper" })) {
+        return try runResearch(state, msg);
+    }
+
+    if (containsAny(msg, &.{ "read", "打开文件", "读取", "readfile" })) {
+        if (try latestImportedFile(state)) |fp| {
+            defer state.allocator.free(fp);
+            return try nativeReadFile(state, fp);
+        }
+    }
+
     const memory_prompt = try memoryShow(state);
     defer state.allocator.free(memory_prompt);
 
