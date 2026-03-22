@@ -341,6 +341,9 @@ fn llmDrivenReAct(state: *RuntimeState, user_msg: []const u8) ![]u8 {
             if (try extractJsonString(state.allocator, llm, "final")) |fin| return fin;
             return try state.allocator.dupe(u8, llm);
         }
+        if (action == .none and llm.len > 0) {
+            return try state.allocator.dupe(u8, llm);
+        }
         turn.tool = action;
         turn.tool_input = input;
         const obs = try executeToolAction(state, action, input); defer state.allocator.free(obs);
