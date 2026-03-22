@@ -41,10 +41,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val prefs = application.getSharedPreferences("cclaude", Application.MODE_PRIVATE)
-            val apiKey = prefs.getString("api_key", null)
-            if (!apiKey.isNullOrBlank()) {
-                initialize(apiKey)
-            }
+            val apiKey = prefs.getString("api_key", "") ?: ""
+            initialize(apiKey)
         }
     }
 
@@ -80,7 +78,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _messages.value = _messages.value + assistantMessage
 
             val responseBuilder = StringBuilder()
-            agent.sendMessage(content) { token: String ->
+            val result = agent.sendMessage(content) { token: String ->
                 responseBuilder.append(token)
                 val updated = _messages.value.toMutableList()
                 val lastIndex = updated.size - 1
@@ -91,10 +89,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _messages.value = updated
             }
 
+            val finalText = if (responseBuilder.isNotEmpty()) responseBuilder.toString() else result
             val updated = _messages.value.toMutableList()
             val lastIndex = updated.size - 1
             updated[lastIndex] = assistantMessage.copy(
-                content = responseBuilder.toString(),
+                content = finalText,
                 isStreaming = false
             )
             _messages.value = updated
