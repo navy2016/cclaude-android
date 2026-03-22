@@ -22,7 +22,6 @@ pub const LiteratureFinder = struct {
         };
     }
     
-    /// Search across multiple sources
     pub fn search(self: LiteratureFinder, query: []const u8, max_results: u32) !std.ArrayList(Paper) {
         _ = query;
         _ = max_results;
@@ -30,14 +29,12 @@ pub const LiteratureFinder = struct {
         return papers;
     }
     
-    /// Validate paper exists via DOI
     pub fn validateDoi(self: LiteratureFinder, doi: []const u8) !bool {
         _ = self;
         _ = doi;
         return true;
     }
     
-    /// Check semantic alignment
     pub fn checkSemanticAlignment(self: LiteratureFinder, citation_context: []const u8, paper_abstract: []const u8) f32 {
         _ = self;
         _ = citation_context;
@@ -45,7 +42,6 @@ pub const LiteratureFinder = struct {
         return 0.85;
     }
     
-    /// Filter papers by quality score
     pub fn filterByQuality(self: *LiteratureFinder, papers: *std.ArrayList(Paper)) void {
         var i: usize = 0;
         while (i < papers.items.len) {
