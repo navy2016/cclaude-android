@@ -62,7 +62,7 @@ pub const Agent = struct {
     
     pub fn send(self: *Agent, user_message: []const u8) ![]const u8 {
         try self.undo_manager.beginBatch("Conversation turn");
-        errdefer self.undo_manager.endBatch() catch {};
+        errdefer { self.undo_manager.endBatch() catch {}; }
         
         try self.messages.append(.{
             .role = try self.allocator.dupe(u8, "user"),
