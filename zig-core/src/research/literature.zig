@@ -25,7 +25,7 @@ pub const LiteratureFinder = struct {
     pub fn search(self: LiteratureFinder, query: []const u8, max_results: u32) !std.ArrayList(Paper) {
         _ = query;
         _ = max_results;
-        var papers = std.ArrayList(Paper).init(self.allocator);
+        const papers = std.ArrayList(Paper).init(self.allocator);
         return papers;
     }
     
