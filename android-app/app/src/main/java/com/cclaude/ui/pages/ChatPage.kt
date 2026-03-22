@@ -25,7 +25,6 @@ fun ChatPage(
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
-    val isInitialized by viewModel.isInitialized.collectAsStateWithLifecycle()
     val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
     val canRedo by viewModel.canRedo.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -42,14 +41,18 @@ fun ChatPage(
             TopAppBar(
                 title = { Text("CClaude Agent") },
                 actions = {
-                    IconButton(onClick = { }, enabled = canUndo) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, "Undo")
+                    if (canUndo) {
+                        IconButton(onClick = { scope.launch { viewModel.undo() } }) {
+                            Icon(Icons.Default.Refresh, "Undo")
+                        }
                     }
-                    IconButton(onClick = { }, enabled = canRedo) {
-                        Icon(Icons.AutoMirrored.Filled.Redo, "Redo")
+                    if (canRedo) {
+                        IconButton(onClick = { scope.launch { viewModel.redo() } }) {
+                            Icon(Icons.Default.Refresh, "Redo")
+                        }
                     }
                     IconButton(onClick = { viewModel.clearChat() }) {
-                        Icon(Icons.Default.ClearAll, "Clear chat")
+                        Icon(Icons.Default.Delete, "Clear chat")
                     }
                 }
             )
