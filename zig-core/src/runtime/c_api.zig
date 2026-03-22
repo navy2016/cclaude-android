@@ -90,8 +90,7 @@ fn nativeSearch(state: *RuntimeState, needle: []const u8) ![]const u8 {
         const content = file.readToEndAlloc(state.allocator, 1024 * 1024) catch continue;
         defer state.allocator.free(content);
         if (std.mem.indexOf(u8, content, needle) != null) {
-            try result.writer().print("{s}
-", .{entry.path});
+            try result.writer().print("{s}\n", .{entry.path});
         }
     }
     if (result.items.len == 0) return try state.allocator.dupe(u8, "No matches found");
@@ -105,14 +104,7 @@ fn memoryShow(state: *RuntimeState) ![]const u8 {
     defer state.allocator.free(user);
     const mem = std.fs.cwd().readFileAlloc(state.allocator, try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "MEMORY.md" }), 1024 * 1024) catch try state.allocator.dupe(u8, "");
     defer state.allocator.free(mem);
-    return try std.fmt.allocPrint(state.allocator, "## Soul
-{s}
-
-## User
-{s}
-
-## Memory
-{s}", .{ soul, user, mem });
+    return try std.fmt.allocPrint(state.allocator, "## Soul\n{s}\n\n## User\n{s}\n\n## Memory\n{s}", .{ soul, user, mem });
 }
 
 fn ensureContextFiles(state: *RuntimeState) !void {
