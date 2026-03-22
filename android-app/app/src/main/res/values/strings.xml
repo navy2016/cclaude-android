@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">CClaude Agent</string>
+    <string name="undo">Undo</string>
+    <string name="redo">Redo</string>
+    <string name="send">Send</string>
+    <string name="type_message">Ask CClaude...</string>
+</resources>
