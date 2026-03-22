@@ -1,15 +1,14 @@
-//! Simple JSON utilities (minimal implementation)
-//! For complex JSON, consider using a full library
+//! Simple JSON utilities
 
 const std = @import("std");
 
-/// Parse a simple string value from JSON (handles escaped quotes)
+/// Parse a simple string value from JSON
 pub fn parseStringValue(allocator: std.mem.Allocator, json_str: []const u8, key: []const u8) !?[]const u8 {
-    const pattern = try std.fmt.allocPrint(allocator, "\"{s}\":\s*\"", .{key});
+    const pattern = try std.fmt.allocPrint(allocator, "\"{s}\": ", .{key});
     defer allocator.free(pattern);
     
     if (std.mem.indexOf(u8, json_str, pattern)) |start| {
-        const value_start = start + pattern.len;
+        const value_start = start + pattern.len + 1; // skip opening quote
         var end = value_start;
         while (end < json_str.len) : (end += 1) {
             if (json_str[end] == '"' and json_str[end - 1] != '\\') break;
@@ -19,12 +18,12 @@ pub fn parseStringValue(allocator: std.mem.Allocator, json_str: []const u8, key:
     return null;
 }
 
-/// Parse a JSON array of objects (simplified)
+/// Parse a JSON array of objects
 pub fn parseArrayObjects(allocator: std.mem.Allocator, json_str: []const u8, array_key: []const u8) !std.ArrayList([]const u8) {
     var results = std.ArrayList([]const u8).init(allocator);
     errdefer results.deinit();
     
-    const pattern = try std.fmt.allocPrint(allocator, "\"{s}\":\s*\[", .{array_key});
+    const pattern = try std.fmt.allocPrint(allocator, "\"{s}\": [", .{array_key});
     defer allocator.free(pattern);
     
     if (std.mem.indexOf(u8, json_str, pattern)) |start| {
