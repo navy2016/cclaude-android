@@ -8,11 +8,26 @@ const MAX_CSTR = 1024 * 1024;
 var g_cstr_buf: [MAX_CSTR]u8 = [_]u8{0} ** MAX_CSTR;
 var g_token_buf: [8192]u8 = [_]u8{0} ** 8192;
 
-const OpKind = enum { write_file, memory_file_replace, none };
+const OpKind = enum { write_file, memory_file_replace, research_state_replace, none };
 const UndoOp = struct {
     kind: OpKind,
     target: []u8,
     previous: []u8,
+};
+
+const ReActAction = enum {
+    none,
+    search_context,
+    read_imported,
+    do_research,
+    answer,
+};
+
+const ReActState = struct {
+    goal: []const u8,
+    action: ReActAction,
+    observation: []const u8,
+    done: bool = false,
 };
 
 const RuntimeState = struct {
@@ -104,6 +119,59 @@ fn pushUndoOp(state: *RuntimeState, target: []const u8, previous: []const u8, ki
     state.redo_stack.clearRetainingCapacity();
 }
 
+fn memoryFilePath(state: *RuntimeState, file_name: []const u8) ![]u8 {
+    return try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", file_name });
+}
+
+fn ensureContextFiles(state: *RuntimeState) !void {
+    const base = try std.fs.path.join(state.allocator, &.{ state.data_dir, "context" });
+    defer state.allocator.free(base);
+    try std.fs.cwd().makePath(base);
+    const defaults = [_][2][]const u8{
+        .{ "SOUL.md", "# Soul\n\n**Name:** CClaude\n\n**Tone:** Precise, practical, rollback-first\n" },
+        .{ "USER.md", "# User Profile\n\n- Prefers Android-native local agent workflows\n" },
+        .{ "MEMORY.md", "# Long-term Memory\n\n- Native Zig runtime initialized\n" },
+        .{ "RESEARCH_STATE.md", "# Research State\n\n- Idle\n" },
+    };
+    for (defaults) |entry| {
+        const fp = try std.fs.path.join(state.allocator, &.{ base, entry[0] });
+        defer state.allocator.free(fp);
+        if (!pathExists(fp)) {
+            const f = try std.fs.cwd().createFile(fp, .{});
+            defer f.close();
+            try f.writeAll(entry[1]);
+        }
+    }
+}
+
+fn appendMemory(state: *RuntimeState, file_name: []const u8, line: []const u8) !void {
+    const fp = try memoryFilePath(state, file_name);
+    defer state.allocator.free(fp);
+    const current = std.fs.cwd().readFileAlloc(state.allocator, fp, 1024 * 1024) catch try state.allocator.dupe(u8, "");
+    defer state.allocator.free(current);
+    const merged = try std.fmt.allocPrint(state.allocator, "{s}\n- {s}\n", .{ current, line });
+    defer state.allocator.free(merged);
+    const old_content = try state.allocator.dupe(u8, current);
+    errdefer state.allocator.free(old_content);
+    const f = try std.fs.cwd().createFile(fp, .{});
+    defer f.close();
+    try f.writeAll(merged);
+    try pushUndoOp(state, fp, old_content, .memory_file_replace);
+}
+
+fn setResearchState(state: *RuntimeState, content: []const u8) !void {
+    const fp = try memoryFilePath(state, "RESEARCH_STATE.md");
+    defer state.allocator.free(fp);
+    const current = std.fs.cwd().readFileAlloc(state.allocator, fp, 1024 * 1024) catch try state.allocator.dupe(u8, "# Research State\n");
+    defer state.allocator.free(current);
+    const old_content = try state.allocator.dupe(u8, current);
+    errdefer state.allocator.free(old_content);
+    const f = try std.fs.cwd().createFile(fp, .{});
+    defer f.close();
+    try f.writeAll(content);
+    try pushUndoOp(state, fp, old_content, .research_state_replace);
+}
+
 fn nativeReadFile(state: *RuntimeState, path: []const u8) ![]u8 {
     const trimmed = std.mem.trim(u8, path, " \t\r\n");
     if (isExternalAndroidPath(trimmed)) {
@@ -161,10 +229,6 @@ fn searchDir(state: *RuntimeState, base_path: []const u8, needle: []const u8) ![
     return try state.allocator.dupe(u8, result.items);
 }
 
-fn memoryFilePath(state: *RuntimeState, file_name: []const u8) ![]u8 {
-    return try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", file_name });
-}
-
 fn memoryShow(state: *RuntimeState) ![]u8 {
     const soul_path = try memoryFilePath(state, "SOUL.md");
     defer state.allocator.free(soul_path);
@@ -179,41 +243,6 @@ fn memoryShow(state: *RuntimeState) ![]u8 {
     const mem = std.fs.cwd().readFileAlloc(state.allocator, mem_path, 1024 * 1024) catch try state.allocator.dupe(u8, "# Long-term Memory\n");
     defer state.allocator.free(mem);
     return try std.fmt.allocPrint(state.allocator, "## Soul\n{s}\n\n## User\n{s}\n\n## Memory\n{s}", .{ soul, user, mem });
-}
-
-fn ensureContextFiles(state: *RuntimeState) !void {
-    const base = try std.fs.path.join(state.allocator, &.{ state.data_dir, "context" });
-    defer state.allocator.free(base);
-    try std.fs.cwd().makePath(base);
-    const defaults = [_][2][]const u8{
-        .{ "SOUL.md", "# Soul\n\n**Name:** CClaude\n\n**Tone:** Precise, practical, rollback-first\n" },
-        .{ "USER.md", "# User Profile\n\n- Prefers Android-native local agent workflows\n" },
-        .{ "MEMORY.md", "# Long-term Memory\n\n- Native Zig runtime initialized\n" },
-    };
-    for (defaults) |entry| {
-        const fp = try std.fs.path.join(state.allocator, &.{ base, entry[0] });
-        defer state.allocator.free(fp);
-        if (!pathExists(fp)) {
-            const f = try std.fs.cwd().createFile(fp, .{});
-            defer f.close();
-            try f.writeAll(entry[1]);
-        }
-    }
-}
-
-fn appendMemory(state: *RuntimeState, file_name: []const u8, line: []const u8) !void {
-    const fp = try memoryFilePath(state, file_name);
-    defer state.allocator.free(fp);
-    const current = std.fs.cwd().readFileAlloc(state.allocator, fp, 1024 * 1024) catch try state.allocator.dupe(u8, "");
-    defer state.allocator.free(current);
-    const merged = try std.fmt.allocPrint(state.allocator, "{s}\n- {s}\n", .{ current, line });
-    defer state.allocator.free(merged);
-    const old_content = try state.allocator.dupe(u8, current);
-    errdefer state.allocator.free(old_content);
-    const f = try std.fs.cwd().createFile(fp, .{});
-    defer f.close();
-    try f.writeAll(merged);
-    try pushUndoOp(state, fp, old_content, .memory_file_replace);
 }
 
 fn containsAny(hay: []const u8, needles: []const []const u8) bool {
@@ -246,26 +275,21 @@ fn classifyAndRemember(state: *RuntimeState, msg: []const u8) !void {
 }
 
 fn runResearch(state: *RuntimeState, idea: []const u8) ![]u8 {
-    const literature = try std.fmt.allocPrint(state.allocator,
-        "[Literature]\n- Search query: {s}\n- Seed sources: arXiv / Semantic Scholar / OpenAlex\n- Status: ready", .{idea});
-    defer state.allocator.free(literature);
-    const hypothesis = try std.fmt.allocPrint(state.allocator,
-        "[Hypothesis]\n- Core hypothesis: local Zig-native Android agent can reduce runtime weight while preserving agent autonomy\n- Risk: Android scoped storage and JNI complexity", .{});
-    defer state.allocator.free(hypothesis);
-    const experiment = try std.fmt.allocPrint(state.allocator,
-        "[Experiment]\n- Plan 1: native runtime + JNI bridge\n- Plan 2: SAF import + app-private file access\n- Plan 3: undo/redo consistency across UI and native state", .{});
-    defer state.allocator.free(experiment);
-    const paper = try std.fmt.allocPrint(state.allocator,
-        "[Paper]\n- Draft title: Native Zig Android Agent with Rollback-First Tooling\n- Deliverable: literature -> hypothesis -> experiment -> paper pipeline initialized", .{});
-    defer state.allocator.free(paper);
+    const state_md = try std.fmt.allocPrint(state.allocator,
+        "# Research State\n\n## Idea\n{s}\n\n## Literature\n- Search arXiv / Semantic Scholar / OpenAlex\n\n## Hypothesis\n- Local Zig-native Android agent can preserve autonomy with smaller runtime\n\n## Experiment\n- Validate JNI bridge, SAF import, undo/redo consistency\n\n## Paper\n- Draft sections initialized\n",
+        .{idea},
+    );
+    defer state.allocator.free(state_md);
+    try setResearchState(state, state_md);
+
     return try std.fmt.allocPrint(state.allocator,
-        "[Native Zig Research]\nIdea: {s}\n\n{s}\n\n{s}\n\n{s}\n\n{s}", .{ idea, literature, hypothesis, experiment, paper });
+        "[Native Zig Research]\nIdea: {s}\n\n[Literature]\n- Search query prepared\n- Sources: arXiv / Semantic Scholar / OpenAlex\n\n[Hypothesis]\n- Native local agent architecture improves deployability on Android\n\n[Experiment]\n- Validate runtime, tool calls, SAF, rollback consistency\n\n[Paper]\n- Draft title and section plan created",
+        .{idea},
+    );
 }
 
 fn handleToolCommand(state: *RuntimeState, message: []const u8) ![]u8 {
-    if (std.mem.startsWith(u8, message, "/tool readfile ")) {
-        return try nativeReadFile(state, message[15..]);
-    }
+    if (std.mem.startsWith(u8, message, "/tool readfile ")) return try nativeReadFile(state, message[15..]);
     if (std.mem.startsWith(u8, message, "/tool search ")) {
         const rest = std.mem.trim(u8, message[13..], " \t\r\n");
         const context_dir = try std.fs.path.join(state.allocator, &.{ state.data_dir, "context" });
@@ -274,9 +298,7 @@ fn handleToolCommand(state: *RuntimeState, message: []const u8) ![]u8 {
     }
     if (std.mem.startsWith(u8, message, "/tool writefile ")) {
         const rest = message[16..];
-        if (std.mem.indexOf(u8, rest, " :: ")) |sep| {
-            return try nativeWriteFile(state, rest[0..sep], rest[sep + 4 ..]);
-        }
+        if (std.mem.indexOf(u8, rest, " :: ")) |sep| return try nativeWriteFile(state, rest[0..sep], rest[sep + 4 ..]);
         return try state.allocator.dupe(u8, "Usage: /tool writefile <path> :: <content>");
     }
     return try state.allocator.dupe(u8, "Unknown /tool command");
@@ -284,32 +306,53 @@ fn handleToolCommand(state: *RuntimeState, message: []const u8) ![]u8 {
 
 fn reactLoop(state: *RuntimeState, msg: []const u8) ![]u8 {
     try ensureContextFiles(state);
-
     if (std.mem.startsWith(u8, msg, "/tool ")) return try handleToolCommand(state, msg);
     if (std.mem.eql(u8, msg, "/memory show")) return try memoryShow(state);
     if (std.mem.startsWith(u8, msg, "/research ")) return try runResearch(state, std.mem.trim(u8, msg[10..], " \t\r\n"));
 
     try classifyAndRemember(state, msg);
 
-    if (containsAny(msg, &.{ "search", "find", "查找", "搜索" })) {
-        const context_dir = try std.fs.path.join(state.allocator, &.{ state.data_dir, "context" });
-        defer state.allocator.free(context_dir);
-        return try searchDir(state, context_dir, "CClaude");
-    }
-    if (containsAny(msg, &.{ "research", "论文", "研究", "paper" })) {
-        return try runResearch(state, msg);
-    }
-    if (containsAny(msg, &.{ "read", "打开文件", "读取", "readfile" })) {
-        if (try latestImportedFile(state)) |fp| {
-            defer state.allocator.free(fp);
-            return try nativeReadFile(state, fp);
+    var react = ReActState{ .goal = msg, .action = .none, .observation = "" };
+    var step: u8 = 0;
+    while (step < 4 and !react.done) : (step += 1) {
+        if (step == 0) {
+            if (containsAny(react.goal, &.{ "search", "find", "查找", "搜索" })) react.action = .search_context
+            else if (containsAny(react.goal, &.{ "research", "论文", "研究", "paper" })) react.action = .do_research
+            else if (containsAny(react.goal, &.{ "read", "打开文件", "读取", "readfile" })) react.action = .read_imported
+            else react.action = .answer;
+            continue;
+        }
+        if (step == 1) {
+            switch (react.action) {
+                .search_context => {
+                    const context_dir = try std.fs.path.join(state.allocator, &.{ state.data_dir, "context" });
+                    defer state.allocator.free(context_dir);
+                    react.observation = try searchDir(state, context_dir, "CClaude");
+                },
+                .do_research => react.observation = try runResearch(state, react.goal),
+                .read_imported => {
+                    if (try latestImportedFile(state)) |fp| {
+                        defer state.allocator.free(fp);
+                        react.observation = try nativeReadFile(state, fp);
+                    } else {
+                        react.observation = try state.allocator.dupe(u8, "No imported file found. Use the folder button first.");
+                    }
+                },
+                .answer => {
+                    const memory_prompt = try memoryShow(state);
+                    defer state.allocator.free(memory_prompt);
+                    react.observation = try std.fmt.allocPrint(state.allocator,
+                        "[Native Zig] CClaude online.\nReceived: {s}\n\n## Context Snapshot\n{s}\n\nTry commands:\n- /tool readfile <path>\n- /tool writefile <path> :: <content>\n- /tool search <text>\n- /memory show\n- /research <idea>", .{ react.goal, memory_prompt });
+                },
+                .none => react.observation = try state.allocator.dupe(u8, "No action selected"),
+            }
+            continue;
+        }
+        if (step == 2) {
+            react.done = true;
         }
     }
-
-    const memory_prompt = try memoryShow(state);
-    defer state.allocator.free(memory_prompt);
-    return try std.fmt.allocPrint(state.allocator,
-        "[Native Zig] CClaude online.\nReceived: {s}\n\n## Context Snapshot\n{s}\n\nTry commands:\n- /tool readfile <path>\n- /tool writefile <path> :: <content>\n- /tool search <text>\n- /memory show\n- /research <idea>", .{ msg, memory_prompt });
+    return try state.allocator.dupe(u8, react.observation);
 }
 
 export fn cclaude_init(data_dir: [*c]const u8, api_key: [*c]const u8) i32 {
@@ -326,23 +369,16 @@ export fn cclaude_free() void {
     }
 }
 
-export fn cclaude_set_http_callback(callback: ?HttpCallback) void {
-    if (global_state) |state| state.http_callback = callback;
-}
-
-export fn cclaude_set_approval_callback(callback: ?ApprovalCallback) void {
-    if (global_state) |state| state.approval_callback = callback;
-}
+export fn cclaude_set_http_callback(callback: ?HttpCallback) void { if (global_state) |state| state.http_callback = callback; }
+export fn cclaude_set_approval_callback(callback: ?ApprovalCallback) void { if (global_state) |state| state.approval_callback = callback; }
 
 export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*c]const u8 {
     const state = global_state orelse return @ptrCast("Error: not initialized");
     const msg = std.mem.span(message);
-
     setOwnedString(&state.last_user_message, msg, state.allocator) catch return @ptrCast("Error: OOM");
     const response_const = reactLoop(state, msg) catch return @ptrCast("Error: native runtime failure");
     const response = state.allocator.dupe(u8, response_const) catch return @ptrCast("Error: OOM");
     state.allocator.free(response_const);
-
     if (state.last_response) |old| state.allocator.free(old);
     state.last_response = response;
     setOwnedString(&state.undo_desc, "Undo last native operation", state.allocator) catch {};
@@ -421,6 +457,4 @@ export fn cclaude_rollback_conversation() i32 {
     return 0;
 }
 
-export fn cclaude_free_string(s: [*c]const u8) void {
-    _ = s;
-}
+export fn cclaude_free_string(s: [*c]const u8) void { _ = s; }
