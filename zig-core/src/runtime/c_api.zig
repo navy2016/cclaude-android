@@ -298,8 +298,6 @@ export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*
             @memcpy(g_token_buf[0..token_len - 1], part[0 .. token_len - 1]);
             g_token_buf[token_len - 1] = ' ';
             g_token_buf[token_len] = 0;
-            pos += 1;
-            _ = pos;
             cb(@ptrCast(&g_token_buf[0]));
         }
     }
