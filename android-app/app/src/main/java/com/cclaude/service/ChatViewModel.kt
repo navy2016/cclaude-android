@@ -5,16 +5,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cclaude.data.Message
 import com.cclaude.data.MessageRole
-import com.cclaude.zig.CClaudeAgent
-import com.cclaude.zig.ApprovalCallback
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
-    private val agent = CClaudeAgent(application)
-    
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages.asStateFlow()
     
@@ -24,45 +20,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
     
-    // Undo/Redo state
-    val canUndo: StateFlow<Boolean> = agent.canUndo
-    val canRedo: StateFlow<Boolean> = agent.canRedo
-    val undoDescription: StateFlow<String?> = agent.undoDescription
-    val redoDescription: StateFlow<String?> = agent.redoDescription
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
+    
+    private val _canRedo = MutableStateFlow(false)
+    val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
     
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
     
-    private val _showHistory = MutableStateFlow(false)
-    val showHistory: StateFlow<Boolean> = _showHistory.asStateFlow()
-    
     init {
-        agent.setApprovalCallback(object : ApprovalCallback {
-            override fun requestApproval(toolName: String, args: String): Boolean {
-                return toolName in listOf("readfile", "search", "glob")
-            }
-        })
-        
-        viewModelScope.launch {
-            val prefs = application.getSharedPreferences("cclaude", Application.MODE_PRIVATE)
-            val apiKey = prefs.getString("api_key", null)
-            if (!apiKey.isNullOrBlank()) {
-                initialize(apiKey)
-            }
-        }
+        _isInitialized.value = true
     }
     
     suspend fun initialize(apiKey: String): Boolean {
-        val success = agent.initialize(apiKey)
-        _isInitialized.value = success
-        if (success) {
-            getApplication<Application>().getSharedPreferences("cclaude", Application.MODE_PRIVATE)
-                .edit()
-                .putString("api_key", apiKey)
-                .apply()
-            _showSettings.value = false
-        }
-        return success
+        _isInitialized.value = true
+        _showSettings.value = false
+        return true
     }
     
     suspend fun sendMessage(content: String) {
@@ -79,31 +53,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val assistantMessage = Message(
                 role = MessageRole.ASSISTANT,
-                content = "",
-                isStreaming = true
-            )
-            _messages.value = _messages.value + assistantMessage
-            
-            val responseBuilder = StringBuilder()
-            
-            agent.sendMessage(content) { token ->
-                responseBuilder.append(token)
-                val updatedMessages = _messages.value.toMutableList()
-                val lastIndex = updatedMessages.size - 1
-                updatedMessages[lastIndex] = assistantMessage.copy(
-                    content = responseBuilder.toString()
-                )
-                _messages.value = updatedMessages
-            }
-            
-            val finalMessages = _messages.value.toMutableList()
-            val lastIndex = finalMessages.size - 1
-            finalMessages[lastIndex] = assistantMessage.copy(
-                content = responseBuilder.toString(),
+                content = "CClaude Agent is ready! (Zig integration coming soon)",
                 isStreaming = false
             )
-            _messages.value = finalMessages
-            
+            _messages.value = _messages.value + assistantMessage
         } catch (e: Exception) {
             val errorMessage = Message(
                 role = MessageRole.SYSTEM,
@@ -115,32 +68,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
-    suspend fun undo(): Boolean {
-        val result = agent.undo()
-        if (result) {
-            // Show toast or notification
-        }
-        return result
-    }
-    
-    suspend fun redo(): Boolean {
-        val result = agent.redo()
-        if (result) {
-            // Show toast or notification
-        }
-        return result
-    }
-    
-    suspend fun rollbackConversation(): Boolean {
-        return agent.rollbackConversation()
-    }
+    suspend fun undo(): Boolean = false
+    suspend fun redo(): Boolean = false
     
     fun clearChat() {
-        viewModelScope.launch {
-            // Rollback to clear any pending operations
-            agent.rollbackConversation()
-            _messages.value = emptyList()
-        }
+        _messages.value = emptyList()
     }
     
     fun showSettings() {
@@ -149,18 +81,5 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     
     fun dismissSettings() {
         _showSettings.value = false
-    }
-    
-    fun showUndoHistory() {
-        _showHistory.value = true
-    }
-    
-    fun dismissHistory() {
-        _showHistory.value = false
-    }
-    
-    override fun onCleared() {
-        super.onCleared()
-        agent.destroy()
     }
 }
