@@ -21,27 +21,29 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatPage(
-    viewModel: ChatViewModel = viewModel()
+    viewModel: ChatViewModel = viewModel(),
+    onPickDocument: () -> Unit = {},
+    importedFilePath: String? = null,
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
-    val isInitialized by viewModel.isInitialized.collectAsStateWithLifecycle()
     val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
     val canRedo by viewModel.canRedo.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    
+
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
     }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("CClaude Agent") },
                 actions = {
+                    IconButton(onClick = onPickDocument) {
+                        Icon(Icons.Default.FolderOpen, "Import document")
+                    }
                     if (canUndo) {
                         IconButton(onClick = { scope.launch { viewModel.undo() } }) {
                             Icon(Icons.Default.Refresh, "Undo")
@@ -64,10 +66,21 @@ fun ChatPage(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            if (importedFilePath != null) {
+                Surface(
+                    tonalElevation = 2.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Imported: $importedFilePath",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
             LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 state = listState,
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -75,27 +88,18 @@ fun ChatPage(
                 items(messages) { message ->
                     ChatMessageItem(message = message)
                 }
-                
                 if (isLoading) {
                     item {
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                strokeWidth = 2.dp
-                            )
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                         }
                     }
                 }
             }
-            
+
             ChatInput(
                 onSend = { message ->
-                    scope.launch {
-                        viewModel.sendMessage(message)
-                    }
+                    scope.launch { viewModel.sendMessage(message) }
                 },
                 isLoading = isLoading
             )
