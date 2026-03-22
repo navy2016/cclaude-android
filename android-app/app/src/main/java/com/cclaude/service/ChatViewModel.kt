@@ -32,6 +32,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
 
+    // UI-side history for visible rollback
+    private val undoSnapshots = ArrayDeque<List<Message>>()
+    private val redoSnapshots = ArrayDeque<List<Message>>()
+
     init {
         agent.setApprovalCallback(object : ApprovalCallback {
             override fun requestApproval(toolName: String, args: String): Boolean {
@@ -59,11 +63,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return success
     }
 
+    private fun pushUndoSnapshot() {
+        undoSnapshots.addLast(_messages.value.map { it.copy() })
+        if (undoSnapshots.size > 100) undoSnapshots.removeFirst()
+        redoSnapshots.clear()
+    }
+
     suspend fun sendMessage(content: String) {
         if (!_isInitialized.value) {
             _showSettings.value = true
             return
         }
+
+        pushUndoSnapshot()
 
         val userMessage = Message(role = MessageRole.USER, content = content)
         _messages.value = _messages.value + userMessage
@@ -82,21 +94,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 responseBuilder.append(token)
                 val updated = _messages.value.toMutableList()
                 val lastIndex = updated.size - 1
-                updated[lastIndex] = assistantMessage.copy(
-                    content = responseBuilder.toString(),
-                    isStreaming = true
-                )
-                _messages.value = updated
+                if (lastIndex >= 0) {
+                    updated[lastIndex] = assistantMessage.copy(
+                        content = responseBuilder.toString(),
+                        isStreaming = true
+                    )
+                    _messages.value = updated
+                }
             }
 
             val finalText = if (responseBuilder.isNotEmpty()) responseBuilder.toString() else result
             val updated = _messages.value.toMutableList()
             val lastIndex = updated.size - 1
-            updated[lastIndex] = assistantMessage.copy(
-                content = finalText,
-                isStreaming = false
-            )
-            _messages.value = updated
+            if (lastIndex >= 0) {
+                updated[lastIndex] = assistantMessage.copy(
+                    content = finalText,
+                    isStreaming = false
+                )
+                _messages.value = updated
+            }
         } catch (e: Exception) {
             _messages.value = _messages.value + Message(
                 role = MessageRole.SYSTEM,
@@ -107,10 +123,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun undo(): Boolean = agent.undo()
-    suspend fun redo(): Boolean = agent.redo()
+    suspend fun undo(): Boolean {
+        val nativeOk = agent.undo()
+        if (undoSnapshots.isNotEmpty()) {
+            redoSnapshots.addLast(_messages.value.map { it.copy() })
+            _messages.value = undoSnapshots.removeLast()
+            return true
+        }
+        return nativeOk
+    }
+
+    suspend fun redo(): Boolean {
+        val nativeOk = agent.redo()
+        if (redoSnapshots.isNotEmpty()) {
+            undoSnapshots.addLast(_messages.value.map { it.copy() })
+            _messages.value = redoSnapshots.removeLast()
+            return true
+        }
+        return nativeOk
+    }
 
     fun clearChat() {
+        pushUndoSnapshot()
         _messages.value = emptyList()
     }
 
