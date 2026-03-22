@@ -1,29 +1,24 @@
-name: Build Android APK
+name: Build Android APK (ARM64)
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install Zig
-        run: wget -q https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
-      - name: Extract
-        run: tar -xf zig-linux-x86_64-0.13.0.tar.xz
-      - name: Build Zig
-        run: |
-          cd zig-core
-          ../zig-linux-x86_64-0.13.0/zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseSafe
-          mkdir -p ../android-app/zig-bridge/src/main/jniLibs/arm64-v8a
-          cp zig-out/lib/libcclaude.so ../android-app/zig-bridge/src/main/jniLibs/arm64-v8a/
+        
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           java-version: "17"
           distribution: "temurin"
+
       - name: Build APK
         run: |
           cd android-app
@@ -31,6 +26,7 @@ jobs:
           ./gradlew assembleDebug --no-daemon
           mkdir -p output
           find . -name "*.apk" -exec cp {} output/ \;
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
