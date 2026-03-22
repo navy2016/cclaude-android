@@ -35,6 +35,7 @@ jobs:
         run: |
           cd android-app
           chmod +x gradlew
+          export GRADLE_OPTS="-Dorg.gradle.internal.http.connectionTimeout=60000 -Dorg.gradle.internal.http.socketTimeout=60000"
           ./gradlew :app:assembleDebug --no-daemon
           mkdir -p output
           find . -name "*.apk" -exec cp {} output/ \;
