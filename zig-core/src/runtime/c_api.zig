@@ -377,8 +377,17 @@ fn reactLoop(state: *RuntimeState, msg: []const u8) ![]u8 {
 }
 
 export fn cclaude_init(data_dir: [*c]const u8, api_key: [*c]const u8) i32 {
-    if (global_state != null) return 0;
-    global_state = RuntimeState.init(allocator(), std.mem.span(data_dir), std.mem.span(api_key)) catch return -1;
+    const dd = std.mem.span(data_dir);
+    const ak = std.mem.span(api_key);
+    if (global_state) |state| {
+        if (state.api_key.len > 0) state.allocator.free(state.api_key);
+        state.api_key = state.allocator.dupe(u8, ak) catch return -1;
+        if (state.data_dir.len > 0) state.allocator.free(state.data_dir);
+        state.data_dir = state.allocator.dupe(u8, dd) catch return -1;
+        ensureBaseFiles(state) catch return -1;
+        return 0;
+    }
+    global_state = RuntimeState.init(allocator(), dd, ak) catch return -1;
     ensureBaseFiles(global_state.?) catch return -1;
     return 0;
 }
