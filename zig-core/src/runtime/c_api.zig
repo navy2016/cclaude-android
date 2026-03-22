@@ -363,7 +363,7 @@ export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*
     return toStableCString(response);
 }
 
-fn restoreOp(state: *RuntimeState, op: UndoOp) !void {
+fn restoreOp(_state: *RuntimeState, op: UndoOp) !void {
     const f = try std.fs.cwd().createFile(op.target, .{});
     defer f.close();
     try f.writeAll(op.previous);
