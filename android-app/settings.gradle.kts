@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "CClaude"
 include(":app")
+include(":zig-bridge")
