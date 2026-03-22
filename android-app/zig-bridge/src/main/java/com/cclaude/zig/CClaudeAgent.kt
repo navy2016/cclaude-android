@@ -38,6 +38,8 @@ class CClaudeAgent(private val context: Context) {
     fun updateProviderConfig(config: ProviderConfig) {
         providerConfig = config
         providerManager.save(config)
+        CClaudeNative.free()
+        _isInitialized.value = false
     }
 
     suspend fun initialize(apiKey: String = providerConfig.apiKey): Boolean = withContext(Dispatchers.IO) {
@@ -111,7 +113,7 @@ class CClaudeAgent(private val context: Context) {
             }
         } catch (e: Exception) {
             val msg = escapeJson(e.message ?: "unknown")
-            return "500:{\"content\":[{\"type\":\"text\",\"text\":\"Provider HTTP error: $msg\"}]}"
+            "500:{\"content\":[{\"type\":\"text\",\"text\":\"Provider HTTP error: $msg\"}]}"
         }
     }
 
@@ -140,7 +142,8 @@ class CClaudeAgent(private val context: Context) {
                 {"role": "system", "content": "${escapeJson(system)}"},
                 {"role": "user", "content": "${escapeJson(user)}"}
               ],
-              "temperature": 0.2
+              "temperature": 0.2,
+              "stream": false
             }
         """.trimIndent()
 
@@ -153,9 +156,19 @@ class CClaudeAgent(private val context: Context) {
 
         client.newCall(request).execute().use { response ->
             val raw = response.body?.string() ?: ""
-            val text = raw.substringAfter("\"content\":\"").substringBefore("\"")
+            val text = extractOpenAiText(raw)
             val wrapped = "{\"content\":[{\"type\":\"text\",\"text\":\"${escapeJson(text)}\"}]}"
             return "${response.code}:$wrapped"
+        }
+    }
+
+    private fun extractOpenAiText(raw: String): String {
+        return when {
+            raw.contains("\"choices\"") && raw.contains("\"message\"") && raw.contains("\"content\"") ->
+                raw.substringAfter("\"content\":\"").substringBefore("\"", missingDelimiterValue = raw)
+            raw.contains("\"output_text\"") ->
+                raw.substringAfter("\"output_text\":\"").substringBefore("\"", missingDelimiterValue = raw)
+            else -> raw
         }
     }
 
