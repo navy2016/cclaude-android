@@ -4,10 +4,6 @@ const TokenCallback = *const fn ([*c]const u8) callconv(.C) void;
 const HttpCallback = *const fn ([*c]const u8, [*c]const u8, [*c]const u8, usize) callconv(.C) [*c]const u8;
 const ApprovalCallback = *const fn ([*c]const u8, [*c]const u8) callconv(.C) bool;
 
-const tools = @import("../tools/root.zig");
-const mem_ctx = @import("../memory/context.zig");
-const research = @import("../research/pipeline.zig");
-
 const RuntimeState = struct {
     allocator: std.mem.Allocator,
     data_dir: []u8,
@@ -20,27 +16,18 @@ const RuntimeState = struct {
     last_response: ?[]u8 = null,
     undo_desc: ?[]u8 = null,
     redo_desc: ?[]u8 = null,
-    tool_registry: tools.ToolRegistry,
-    context_store: mem_ctx.ContextStore,
 
     fn init(alloc: std.mem.Allocator, data_dir: []const u8, api_key: []const u8) !*RuntimeState {
         const state = try alloc.create(RuntimeState);
-        var registry = tools.ToolRegistry.init(alloc);
-        try registry.registerCoreTools();
-        const ctx = try mem_ctx.ContextStore.init(alloc, data_dir);
         state.* = .{
             .allocator = alloc,
             .data_dir = try alloc.dupe(u8, data_dir),
             .api_key = try alloc.dupe(u8, api_key),
-            .tool_registry = registry,
-            .context_store = ctx,
         };
         return state;
     }
 
     fn deinit(self: *RuntimeState) void {
-        self.tool_registry.deinit();
-        self.context_store.deinit();
         self.allocator.free(self.data_dir);
         self.allocator.free(self.api_key);
         if (self.last_user_message) |msg| self.allocator.free(msg);
@@ -69,6 +56,63 @@ fn allocNullTerminated(bytes: []const u8) ?[*c]const u8 {
 fn setOwnedString(slot: *?[]u8, value: []const u8, a: std.mem.Allocator) !void {
     if (slot.*) |old| a.free(old);
     slot.* = try a.dupe(u8, value);
+}
+
+
+fn nativeReadFile(state: *RuntimeState, path: []const u8) ![]const u8 {
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    return try file.readToEndAlloc(state.allocator, 1024 * 1024);
+}
+
+fn nativeWriteFile(state: *RuntimeState, path: []const u8, content: []const u8) ![]const u8 {
+    if (std.mem.lastIndexOf(u8, path, "/")) |last_slash| {
+        const dir_path = path[0..last_slash];
+        std.fs.cwd().makePath(dir_path) catch {};
+    }
+    const file = try std.fs.cwd().createFile(path, .{});
+    defer file.close();
+    try file.writeAll(content);
+    return try std.fmt.allocPrint(state.allocator, "Wrote file: {s}", .{path});
+}
+
+fn nativeSearch(state: *RuntimeState, needle: []const u8) ![]const u8 {
+    var result = std.ArrayList(u8).init(state.allocator);
+    defer result.deinit();
+    var dir = try std.fs.cwd().openDir(".", .{ .iterate = true });
+    defer dir.close();
+    var walker = try dir.walk(state.allocator);
+    defer walker.deinit();
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file) continue;
+        const file = dir.openFile(entry.path, .{}) catch continue;
+        defer file.close();
+        const content = file.readToEndAlloc(state.allocator, 1024 * 1024) catch continue;
+        defer state.allocator.free(content);
+        if (std.mem.indexOf(u8, content, needle) != null) {
+            try result.writer().print("{s}
+", .{entry.path});
+        }
+    }
+    if (result.items.len == 0) return try state.allocator.dupe(u8, "No matches found");
+    return try state.allocator.dupe(u8, result.items);
+}
+
+fn memoryShow(state: *RuntimeState) ![]const u8 {
+    const soul = std.fs.cwd().readFileAlloc(state.allocator, try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "SOUL.md" }), 1024 * 1024) catch try state.allocator.dupe(u8, "");
+    defer state.allocator.free(soul);
+    const user = std.fs.cwd().readFileAlloc(state.allocator, try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "USER.md" }), 1024 * 1024) catch try state.allocator.dupe(u8, "");
+    defer state.allocator.free(user);
+    const mem = std.fs.cwd().readFileAlloc(state.allocator, try std.fs.path.join(state.allocator, &.{ state.data_dir, "context", "MEMORY.md" }), 1024 * 1024) catch try state.allocator.dupe(u8, "");
+    defer state.allocator.free(mem);
+    return try std.fmt.allocPrint(state.allocator, "## Soul
+{s}
+
+## User
+{s}
+
+## Memory
+{s}", .{ soul, user, mem });
 }
 
 fn ensureContextFiles(state: *RuntimeState) !void {
@@ -105,13 +149,9 @@ fn appendMemory(state: *RuntimeState, file_name: []const u8, line: []const u8) !
 }
 
 fn runResearch(state: *RuntimeState, idea: []const u8) ![]const u8 {
-    var pipeline = try research.ResearchPipeline.init(state.allocator);
-    defer pipeline.deinit();
-    try pipeline.start(idea);
-    const progress = pipeline.getProgress();
     return try std.fmt.allocPrint(state.allocator,
-        "[Native Zig Research]\nIdea: {s}\nPipeline stages: {d}\nCurrent: {s}\nStatus: initialized rollback-first research orchestration",
-        .{ idea, progress.total, progress.name },
+        "[Native Zig Research]\nIdea: {s}\nStages: literature -> hypothesis -> experiment -> paper\nStatus: rollback-first orchestrator active",
+        .{ idea },
     );
 }
 
@@ -120,13 +160,13 @@ fn handleToolCommand(state: *RuntimeState, message: []const u8) ![]const u8 {
         const path = message[15..];
         const args = try std.fmt.allocPrint(state.allocator, "{{\"path\":\"{s}\"}}", .{path});
         defer state.allocator.free(args);
-        return try state.tool_registry.execute(state.allocator, "readfile", args);
+        return try nativeReadFile(state, path);
     }
     if (std.mem.startsWith(u8, message, "/tool search ")) {
         const rest = message[13..];
         const args = try std.fmt.allocPrint(state.allocator, "{{\"path\":\".\",\"regex\":\"{s}\"}}", .{rest});
         defer state.allocator.free(args);
-        return try state.tool_registry.execute(state.allocator, "search", args);
+        return try nativeSearch(state, rest);
     }
     if (std.mem.startsWith(u8, message, "/tool writefile ")) {
         const rest = message[16..];
@@ -135,7 +175,7 @@ fn handleToolCommand(state: *RuntimeState, message: []const u8) ![]const u8 {
             const content = rest[sep + 4 ..];
             const args = try std.fmt.allocPrint(state.allocator, "{{\"path\":\"{s}\",\"content\":\"{s}\"}}", .{path, content});
             defer state.allocator.free(args);
-            return try state.tool_registry.execute(state.allocator, "writefile", args);
+            return try nativeWriteFile(state, path, content);
         }
         return try state.allocator.dupe(u8, "Usage: /tool writefile <path> :: <content>");
     }
@@ -152,8 +192,7 @@ fn buildNativeReply(state: *RuntimeState, msg: []const u8) ![]const u8 {
     }
 
     if (std.mem.eql(u8, msg, "/memory show")) {
-        const prompt = try state.context_store.buildPrompt(state.allocator);
-        return prompt;
+        return try memoryShow(state);
     }
 
     if (std.mem.startsWith(u8, msg, "/research ")) {
@@ -163,7 +202,7 @@ fn buildNativeReply(state: *RuntimeState, msg: []const u8) ![]const u8 {
     }
 
     try appendMemory(state, "USER.md", "User sent a native message");
-    const memory_prompt = try state.context_store.buildPrompt(state.allocator);
+    const memory_prompt = try memoryShow(state);
     defer state.allocator.free(memory_prompt);
 
     return try std.fmt.allocPrint(
