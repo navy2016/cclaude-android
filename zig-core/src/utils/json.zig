@@ -4,16 +4,21 @@ const std = @import("std");
 
 /// Parse a simple string value from JSON
 pub fn parseStringValue(allocator: std.mem.Allocator, json_str: []const u8, key: []const u8) !?[]const u8 {
-    const pattern = try std.fmt.allocPrint(allocator, "\"{s}\": ", .{key});
+    const pattern = try std.fmt.allocPrint(allocator, "\"{s}\":", .{key});
     defer allocator.free(pattern);
     
     if (std.mem.indexOf(u8, json_str, pattern)) |start| {
-        const value_start = start + pattern.len + 1; // skip opening quote
+        const value_start = start + pattern.len;
         var end = value_start;
-        while (end < json_str.len) : (end += 1) {
-            if (json_str[end] == '"' and json_str[end - 1] != '\\') break;
+        while (end < json_str.len and json_str[end] == ' ') end += 1;
+        if (end < json_str.len and json_str[end] == '"') {
+            const str_start = end + 1;
+            end = str_start;
+            while (end < json_str.len) : (end += 1) {
+                if (json_str[end] == '"' and json_str[end - 1] != '\\') break;
+            }
+            return try allocator.dupe(u8, json_str[str_start..end]);
         }
-        return try allocator.dupe(u8, json_str[value_start..end]);
     }
     return null;
 }
