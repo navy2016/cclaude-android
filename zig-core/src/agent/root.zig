@@ -164,7 +164,7 @@ pub const Agent = struct {
             const idx: usize = @intCast(i);
             if (std.mem.eql(u8, self.messages.items[idx].role, "user")) {
                 while (self.messages.items.len > idx + 1) {
-                    var msg = self.messages.pop();
+                    const msg = self.messages.pop();
                     self.allocator.free(msg.role);
                     self.allocator.free(msg.content);
                 }
