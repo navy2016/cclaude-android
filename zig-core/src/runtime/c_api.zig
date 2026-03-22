@@ -292,7 +292,6 @@ export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*
 
     if (token_callback) |cb| {
         var it = std.mem.splitScalar(u8, response, ' ');
-        var pos: usize = 0;
         while (it.next()) |part| {
             const token_len = @min(part.len + 1, g_token_buf.len - 1);
             @memcpy(g_token_buf[0..token_len - 1], part[0 .. token_len - 1]);
