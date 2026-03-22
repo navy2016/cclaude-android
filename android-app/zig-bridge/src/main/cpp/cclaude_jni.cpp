@@ -11,6 +11,13 @@ extern "C" {
     int cclaude_init(const char* data_dir, const char* api_key);
     void cclaude_free();
     const char* cclaude_send(const char* message, void (*token_callback)(const char*));
+    int cclaude_undo();
+    int cclaude_redo();
+    int cclaude_can_undo();
+    int cclaude_can_redo();
+    const char* cclaude_get_undo_description();
+    const char* cclaude_get_redo_description();
+    int cclaude_rollback_conversation();
     void cclaude_set_http_callback(const char* (*callback)(const char*, const char*, const char*, size_t));
     void cclaude_set_approval_callback(int (*callback)(const char*, const char*));
     void cclaude_free_string(const char* s);
@@ -167,4 +174,47 @@ Java_com_cclaude_zig_CClaudeNative_setApprovalCallback(
     }
     g_approval_callback = env->NewGlobalRef(callback);
     cclaude_set_approval_callback(approval_callback);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_cclaude_zig_CClaudeNative_undo(JNIEnv* env, jclass clazz) {
+    return cclaude_undo() == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_cclaude_zig_CClaudeNative_redo(JNIEnv* env, jclass clazz) {
+    return cclaude_redo() == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_cclaude_zig_CClaudeNative_canUndo(JNIEnv* env, jclass clazz) {
+    return cclaude_can_undo() == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_cclaude_zig_CClaudeNative_canRedo(JNIEnv* env, jclass clazz) {
+    return cclaude_can_redo() == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_cclaude_zig_CClaudeNative_getUndoDescription(JNIEnv* env, jclass clazz) {
+    const char* s = cclaude_get_undo_description();
+    if (!s) return nullptr;
+    jstring result = env->NewStringUTF(s);
+    cclaude_free_string(s);
+    return result;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_cclaude_zig_CClaudeNative_getRedoDescription(JNIEnv* env, jclass clazz) {
+    const char* s = cclaude_get_redo_description();
+    if (!s) return nullptr;
+    jstring result = env->NewStringUTF(s);
+    cclaude_free_string(s);
+    return result;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_cclaude_zig_CClaudeNative_rollbackConversation(JNIEnv* env, jclass clazz) {
+    return cclaude_rollback_conversation();
 }
