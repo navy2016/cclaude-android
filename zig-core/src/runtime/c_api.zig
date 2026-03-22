@@ -278,8 +278,7 @@ export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*
     const msg = std.mem.span(message);
 
     setOwnedString(&state.last_user_message, msg, state.allocator) catch return @ptrCast("Error: OOM");
-    const response = buildNativeReply(state, msg) catch |err| {
-        _ = err;
+    const response = buildNativeReply(state, msg) catch {
         return @ptrCast("Error: native runtime failure");
     };
 
