@@ -8,16 +8,15 @@ pub fn parseStringValue(allocator: std.mem.Allocator, json_str: []const u8, key:
     defer allocator.free(pattern);
     
     if (std.mem.indexOf(u8, json_str, pattern)) |start| {
-        const value_start = start + pattern.len;
-        var end = value_start;
-        while (end < json_str.len and json_str[end] == ' ') end += 1;
-        if (end < json_str.len and json_str[end] == '"') {
-            const str_start = end + 1;
-            end = str_start;
-            while (end < json_str.len) : (end += 1) {
-                if (json_str[end] == '"' and json_str[end - 1] != '\\') break;
+        var pos = start + pattern.len;
+        while (pos < json_str.len and json_str[pos] == ' ') pos += 1;
+        if (pos < json_str.len and json_str[pos] == '"') {
+            const str_start = pos + 1;
+            var end_pos = str_start;
+            while (end_pos < json_str.len) : (end_pos += 1) {
+                if (json_str[end_pos] == '"' and json_str[end_pos - 1] != '\\') break;
             }
-            return try allocator.dupe(u8, json_str[str_start..end]);
+            return try allocator.dupe(u8, json_str[str_start..end_pos]);
         }
     }
     return null;
@@ -34,25 +33,28 @@ pub fn parseArrayObjects(allocator: std.mem.Allocator, json_str: []const u8, arr
     if (std.mem.indexOf(u8, json_str, pattern)) |start| {
         var depth: i32 = 1;
         var obj_start: ?usize = null;
-        var i = start + pattern.len;
+        var pos = start + pattern.len;
         
-        while (i < json_str.len and depth > 0) : (i += 1) {
-            switch (json_str[i]) {
+        while (pos < json_str.len and depth > 0) {
+            switch (json_str[pos]) {
                 '{' => {
-                    if (depth == 1) obj_start = i;
+                    if (depth == 1) obj_start = pos;
                     depth += 1;
                 },
                 '}' => {
                     depth -= 1;
                     if (depth == 1 and obj_start != null) {
-                        const obj = try allocator.dupe(u8, json_str[obj_start.?..i+1]);
+                        const obj = try allocator.dupe(u8, json_str[obj_start.?..pos+1]);
                         try results.append(obj);
                         obj_start = null;
                     }
                 },
-                ']' => if (depth == 1) depth -= 1,
+                ']' => {
+                    if (depth == 1) depth -= 1;
+                },
                 else => {},
             }
+            pos += 1;
         }
     }
     
