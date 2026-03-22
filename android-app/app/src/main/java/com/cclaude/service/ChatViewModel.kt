@@ -5,15 +5,16 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cclaude.data.Message
 import com.cclaude.data.MessageRole
-import com.cclaude.zig.CClaudeAgent
+import com.cclaude.provider.ProviderConfig
 import com.cclaude.zig.ApprovalCallback
+import com.cclaude.zig.CClaudeAgent
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.SharingStarted
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val agent = CClaudeAgent(application)
@@ -27,6 +28,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
 
+    private val _showSettings = MutableStateFlow(false)
+    val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
+
+    private val _providerConfig = MutableStateFlow(agent.getProviderConfig())
+    val providerConfig: StateFlow<ProviderConfig> = _providerConfig.asStateFlow()
+
     private val _localCanUndo = MutableStateFlow(false)
     private val _localCanRedo = MutableStateFlow(false)
 
@@ -38,9 +45,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val undoDescription: StateFlow<String?> = agent.undoDescription
     val redoDescription: StateFlow<String?> = agent.redoDescription
 
-    private val _showSettings = MutableStateFlow(false)
-    val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
-
     private val undoSnapshots = ArrayDeque<List<Message>>()
     private val redoSnapshots = ArrayDeque<List<Message>>()
 
@@ -50,12 +54,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 return toolName in listOf("readfile", "search", "glob")
             }
         })
-
         viewModelScope.launch {
-            val prefs = application.getSharedPreferences("cclaude", Application.MODE_PRIVATE)
-            val apiKey = prefs.getString("api_key", "") ?: ""
-            initialize(apiKey)
+            initialize(_providerConfig.value.apiKey)
         }
+    }
+
+    fun openSettings() { _showSettings.value = true }
+    fun closeSettings() { _showSettings.value = false }
+
+    fun saveProviderConfig(config: ProviderConfig) {
+        agent.updateProviderConfig(config)
+        _providerConfig.value = config
+        viewModelScope.launch { initialize(config.apiKey) }
+        _showSettings.value = false
     }
 
     private fun syncLocalUndoState() {
@@ -66,13 +77,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun initialize(apiKey: String): Boolean {
         val success = agent.initialize(apiKey)
         _isInitialized.value = success
-        if (success) {
-            getApplication<Application>().getSharedPreferences("cclaude", Application.MODE_PRIVATE)
-                .edit()
-                .putString("api_key", apiKey)
-                .apply()
-            _showSettings.value = false
-        }
         syncLocalUndoState()
         return success
     }
@@ -85,54 +89,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun sendMessage(content: String) {
-        if (!_isInitialized.value) {
+        if (_providerConfig.value.apiKey.isBlank()) {
             _showSettings.value = true
             return
         }
-
         pushUndoSnapshot()
-
         val userMessage = Message(role = MessageRole.USER, content = content)
         _messages.value = _messages.value + userMessage
         _isLoading.value = true
-
         try {
-            val assistantMessage = Message(
-                role = MessageRole.ASSISTANT,
-                content = "",
-                isStreaming = true
-            )
+            val assistantMessage = Message(role = MessageRole.ASSISTANT, content = "", isStreaming = true)
             _messages.value = _messages.value + assistantMessage
-
             val responseBuilder = StringBuilder()
-            val result = agent.sendMessage(content) { token: String ->
+            val result = agent.sendMessage(content) { token ->
                 responseBuilder.append(token)
                 val updated = _messages.value.toMutableList()
                 val lastIndex = updated.size - 1
                 if (lastIndex >= 0) {
-                    updated[lastIndex] = assistantMessage.copy(
-                        content = responseBuilder.toString(),
-                        isStreaming = true
-                    )
+                    updated[lastIndex] = assistantMessage.copy(content = responseBuilder.toString(), isStreaming = true)
                     _messages.value = updated
                 }
             }
-
             val finalText = if (responseBuilder.isNotEmpty()) responseBuilder.toString() else result
             val updated = _messages.value.toMutableList()
             val lastIndex = updated.size - 1
             if (lastIndex >= 0) {
-                updated[lastIndex] = assistantMessage.copy(
-                    content = finalText,
-                    isStreaming = false
-                )
+                updated[lastIndex] = assistantMessage.copy(content = finalText, isStreaming = false)
                 _messages.value = updated
             }
         } catch (e: Exception) {
-            _messages.value = _messages.value + Message(
-                role = MessageRole.SYSTEM,
-                content = "Error: ${e.message}"
-            )
+            _messages.value = _messages.value + Message(role = MessageRole.SYSTEM, content = "Error: ${e.message}")
         } finally {
             _isLoading.value = false
             syncLocalUndoState()
@@ -167,14 +153,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         pushUndoSnapshot()
         _messages.value = emptyList()
         syncLocalUndoState()
-    }
-
-    fun showSettings() {
-        _showSettings.value = true
-    }
-
-    fun dismissSettings() {
-        _showSettings.value = false
     }
 
     override fun onCleared() {
