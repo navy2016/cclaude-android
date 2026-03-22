@@ -107,6 +107,15 @@ class CClaudeAgent(private val context: Context) {
 
     private fun executeHttpRequest(url: String, headers: String, body: ByteArray): String {
         return try {
+            val method = extractMethod(headers)
+            val isLlmRequest = url.contains("anthropic.com/v1/messages") ||
+                headers.contains("anthropic-version") ||
+                headers.contains("x-api-key")
+
+            if (!isLlmRequest) {
+                return executeRawHttpRequest(url, method, headers, body)
+            }
+
             when (providerConfig.providerType) {
                 ProviderType.CLAUDE, ProviderType.CLAUDE_COMPAT -> executeClaudeCompatible(body)
                 ProviderType.OPENAI_COMPAT -> executeOpenAICompatible(body)
@@ -115,6 +124,36 @@ class CClaudeAgent(private val context: Context) {
             val msg = escapeJson(e.message ?: "unknown")
             "500:{\"content\":[{\"type\":\"text\",\"text\":\"Provider HTTP error: $msg\"}]}"
         }
+    }
+
+    private fun executeRawHttpRequest(url: String, method: String, headers: String, body: ByteArray): String {
+        val requestBuilder = Request.Builder().url(url)
+
+        headers.lines().forEach { line ->
+            val parts = line.split(":", limit = 2)
+            if (parts.size == 2 && parts[0].trim() != "METHOD") {
+                requestBuilder.header(parts[0].trim(), parts[1].trim())
+            }
+        }
+
+        when (method.uppercase()) {
+            "GET" -> requestBuilder.get()
+            "POST" -> requestBuilder.post(body.toRequestBody("application/json".toMediaType()))
+            else -> requestBuilder.get()
+        }
+
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            val bodyStr = response.body?.string() ?: ""
+            return "${response.code}:$bodyStr"
+        }
+    }
+
+    private fun extractMethod(headers: String): String {
+        return headers.lines()
+            .firstOrNull { it.startsWith("METHOD:") }
+            ?.substringAfter(":")
+            ?.trim()
+            ?: "POST"
     }
 
     private fun executeClaudeCompatible(body: ByteArray): String {
@@ -135,6 +174,7 @@ class CClaudeAgent(private val context: Context) {
         val anthropicJson = String(body)
         val system = anthropicJson.substringAfter("\"system\":\"").substringBefore("\"")
         val user = anthropicJson.substringAfter("\"content\":\"").substringBefore("\"")
+        val temperature = if (providerConfig.model.contains("kimi-k2.5", ignoreCase = true)) "1" else "0.2"
         val openAiBody = """
             {
               "model": "${providerConfig.model}",
@@ -142,7 +182,7 @@ class CClaudeAgent(private val context: Context) {
                 {"role": "system", "content": "${escapeJson(system)}"},
                 {"role": "user", "content": "${escapeJson(user)}"}
               ],
-              "temperature": 0.2,
+              "temperature": $temperature,
               "stream": false
             }
         """.trimIndent()
