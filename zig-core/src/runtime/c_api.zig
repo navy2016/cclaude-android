@@ -82,16 +82,16 @@ export fn cclaude_set_approval_callback(callback: ?ApprovalCallback) void {
 }
 
 export fn cclaude_send(message: [*c]const u8, token_callback: ?TokenCallback) [*c]const u8 {
-    const state = global_state orelse return allocNullTerminated("Error: not initialized");
+    const state = global_state orelse return @ptrCast("Error: not initialized");
     const msg = std.mem.span(message);
 
-    setOwnedString(&state.last_user_message, msg, state.allocator) catch return allocNullTerminated("Error: OOM");
+    setOwnedString(&state.last_user_message, msg, state.allocator) catch return @ptrCast("Error: OOM");
 
     const response = std.fmt.allocPrint(
         state.allocator,
         "[Native Zig] CClaude online. Received: {s}\nUndo-ready: true\nDataDir: {s}",
         .{ msg, state.data_dir },
-    ) catch return allocNullTerminated("Error: OOM");
+    ) catch return @ptrCast("Error: OOM");
 
     if (state.last_response) |old| state.allocator.free(old);
     state.last_response = response;
@@ -144,13 +144,13 @@ export fn cclaude_can_redo() i32 {
 
 export fn cclaude_get_undo_description() [*c]const u8 {
     const state = global_state orelse return null;
-    if (state.undo_desc) |d| return allocNullTerminated(d);
+    if (state.undo_desc) |d| return allocNullTerminated(d) orelse @ptrCast("Undo");
     return null;
 }
 
 export fn cclaude_get_redo_description() [*c]const u8 {
     const state = global_state orelse return null;
-    if (state.redo_desc) |d| return allocNullTerminated(d);
+    if (state.redo_desc) |d| return allocNullTerminated(d) orelse @ptrCast("Redo");
     return null;
 }
 
