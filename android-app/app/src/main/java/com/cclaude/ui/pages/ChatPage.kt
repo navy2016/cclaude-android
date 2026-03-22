@@ -5,7 +5,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,15 +47,17 @@ fun ChatPage(
                     IconButton(onClick = onPickDocument) {
                         Icon(Icons.Default.FolderOpen, "Import document")
                     }
-                    if (canUndo) {
-                        IconButton(onClick = { scope.launch { viewModel.undo() } }) {
-                            Icon(Icons.Default.Refresh, "Undo")
-                        }
+                    IconButton(
+                        onClick = { scope.launch { viewModel.undo() } },
+                        enabled = canUndo || messages.isNotEmpty()
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, "Undo")
                     }
-                    if (canRedo) {
-                        IconButton(onClick = { scope.launch { viewModel.redo() } }) {
-                            Icon(Icons.Default.Refresh, "Redo")
-                        }
+                    IconButton(
+                        onClick = { scope.launch { viewModel.redo() } },
+                        enabled = canRedo
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Redo, "Redo")
                     }
                     IconButton(onClick = { viewModel.clearChat() }) {
                         Icon(Icons.Default.Delete, "Clear chat")
@@ -67,10 +72,7 @@ fun ChatPage(
                 .padding(padding)
         ) {
             if (importedFilePath != null) {
-                Surface(
-                    tonalElevation = 2.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "Imported: $importedFilePath",
                         modifier = Modifier.padding(12.dp),
@@ -98,9 +100,7 @@ fun ChatPage(
             }
 
             ChatInput(
-                onSend = { message ->
-                    scope.launch { viewModel.sendMessage(message) }
-                },
+                onSend = { message -> scope.launch { viewModel.sendMessage(message) } },
                 isLoading = isLoading
             )
         }
