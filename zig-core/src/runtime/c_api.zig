@@ -17,12 +17,12 @@ const RuntimeState = struct {
     undo_desc: ?[]u8 = null,
     redo_desc: ?[]u8 = null,
 
-    fn init(allocator: std.mem.Allocator, data_dir: []const u8, api_key: []const u8) !*RuntimeState {
-        const state = try allocator.create(RuntimeState);
+    fn init(alloc: std.mem.Allocator, data_dir: []const u8, api_key: []const u8) !*RuntimeState {
+        const state = try alloc.create(RuntimeState);
         state.* = .{
-            .allocator = allocator,
-            .data_dir = try allocator.dupe(u8, data_dir),
-            .api_key = try allocator.dupe(u8, api_key),
+            .allocator = alloc,
+            .data_dir = try alloc.dupe(u8, data_dir),
+            .api_key = try alloc.dupe(u8, api_key),
         };
         return state;
     }
