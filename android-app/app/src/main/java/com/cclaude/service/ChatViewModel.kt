@@ -5,81 +5,126 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cclaude.data.Message
 import com.cclaude.data.MessageRole
+import com.cclaude.zig.CClaudeAgent
+import com.cclaude.zig.ApprovalCallback
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
+    private val agent = CClaudeAgent(application)
+
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages.asStateFlow()
-    
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-    
+
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
-    
-    private val _canUndo = MutableStateFlow(false)
-    val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
-    
-    private val _canRedo = MutableStateFlow(false)
-    val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
-    
+
+    val canUndo: StateFlow<Boolean> = agent.canUndo
+    val canRedo: StateFlow<Boolean> = agent.canRedo
+    val undoDescription: StateFlow<String?> = agent.undoDescription
+    val redoDescription: StateFlow<String?> = agent.redoDescription
+
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings.asStateFlow()
-    
+
     init {
-        _isInitialized.value = true
+        agent.setApprovalCallback(object : ApprovalCallback {
+            override fun requestApproval(toolName: String, args: String): Boolean {
+                return toolName in listOf("readfile", "search", "glob")
+            }
+        })
+
+        viewModelScope.launch {
+            val prefs = application.getSharedPreferences("cclaude", Application.MODE_PRIVATE)
+            val apiKey = prefs.getString("api_key", null)
+            if (!apiKey.isNullOrBlank()) {
+                initialize(apiKey)
+            }
+        }
     }
-    
+
     suspend fun initialize(apiKey: String): Boolean {
-        _isInitialized.value = true
-        _showSettings.value = false
-        return true
+        val success = agent.initialize(apiKey)
+        _isInitialized.value = success
+        if (success) {
+            getApplication<Application>().getSharedPreferences("cclaude", Application.MODE_PRIVATE)
+                .edit()
+                .putString("api_key", apiKey)
+                .apply()
+            _showSettings.value = false
+        }
+        return success
     }
-    
+
     suspend fun sendMessage(content: String) {
         if (!_isInitialized.value) {
             _showSettings.value = true
             return
         }
-        
+
         val userMessage = Message(role = MessageRole.USER, content = content)
         _messages.value = _messages.value + userMessage
-        
         _isLoading.value = true
-        
+
         try {
             val assistantMessage = Message(
                 role = MessageRole.ASSISTANT,
-                content = "CClaude Agent is ready! (Zig integration coming soon)",
-                isStreaming = false
+                content = "",
+                isStreaming = true
             )
             _messages.value = _messages.value + assistantMessage
+
+            val responseBuilder = StringBuilder()
+            agent.sendMessage(content) { token: String ->
+                responseBuilder.append(token)
+                val updated = _messages.value.toMutableList()
+                val lastIndex = updated.size - 1
+                updated[lastIndex] = assistantMessage.copy(
+                    content = responseBuilder.toString(),
+                    isStreaming = true
+                )
+                _messages.value = updated
+            }
+
+            val updated = _messages.value.toMutableList()
+            val lastIndex = updated.size - 1
+            updated[lastIndex] = assistantMessage.copy(
+                content = responseBuilder.toString(),
+                isStreaming = false
+            )
+            _messages.value = updated
         } catch (e: Exception) {
-            val errorMessage = Message(
+            _messages.value = _messages.value + Message(
                 role = MessageRole.SYSTEM,
                 content = "Error: ${e.message}"
             )
-            _messages.value = _messages.value + errorMessage
         } finally {
             _isLoading.value = false
         }
     }
-    
-    suspend fun undo(): Boolean = false
-    suspend fun redo(): Boolean = false
-    
+
+    suspend fun undo(): Boolean = agent.undo()
+    suspend fun redo(): Boolean = agent.redo()
+
     fun clearChat() {
         _messages.value = emptyList()
     }
-    
+
     fun showSettings() {
         _showSettings.value = true
     }
-    
+
     fun dismissSettings() {
         _showSettings.value = false
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        agent.destroy()
     }
 }
